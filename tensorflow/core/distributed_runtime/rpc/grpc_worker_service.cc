@@ -23,6 +23,7 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/common_runtime/dma_helper.h"
+#include "tensorflow/core/common_runtime/gpu/gpu_tracer.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_util.h"
 #include "tensorflow/core/common_runtime/local_device.h"
 #include "tensorflow/core/common_runtime/process_util.h"
@@ -308,15 +309,18 @@ class GrpcWorkerService : public AsyncServiceInterface {
       call->SendResponse(ToGrpcStatus(s));
       return;
     }
+    // TODO(mrry): Collect results from a profiler if available.
     const bool do_trace = call->request.exec_opts().record_timeline();
     StepStatsCollector* collector = nullptr;
+    GPUTracer* tracer = nullptr;
     if (do_trace) {
       VLOG(0) << "Creating StepStatsCollector";
       collector = new StepStatsCollector(call->response.mutable_step_stats());
-      // TODO(pbar) create GPUTracer!
       VLOG(0) << "Got SSC";
+      // TODO(pbar) create GPUTracer!
+      tracer = CreateGPUTracer();
+      if (tracer) tracer->Start();
     }
-    // TODO(mrry): Collect results from a profiler if available.
     CancellationManager* cm = new CancellationManager;
     call->SetCancelCallback([this, cm, step_id]() {
       cm->StartCancel();
@@ -331,7 +335,7 @@ class GrpcWorkerService : public AsyncServiceInterface {
     }
     env_->graph_mgr->ExecuteAsync(
         call->request.graph_handle(), step_id, call->request.exec_opts(),
-        collector, cm, in, out, [this, call, collector, cm, out, token](Status s) {
+        collector, cm, in, out, [this, call, collector, cm, out, token, tracer](Status s) {
           VLOG(0) << "Done ExecuteAsync";
           VLOG(0) << call->response.step_stats().DebugString();
           call->ClearCancelCallback();
@@ -351,6 +355,10 @@ class GrpcWorkerService : public AsyncServiceInterface {
               TensorProto* proto = recv->mutable_val();
               val.AsProtoField(proto);
             }
+          }
+          if (tracer) {
+            tracer->Stop();
+            tracer->Collect(collector);
           }
           delete collector;
           delete out;
