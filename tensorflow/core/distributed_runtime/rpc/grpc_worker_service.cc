@@ -297,6 +297,7 @@ class GrpcWorkerService : public AsyncServiceInterface {
   }
 
   void DoRunGraph(WorkerCall<RunGraphRequest, RunGraphResponse>* call) {
+    VLOG(0) << "DoRunGraph " << call->request.DebugString();
     const int64 step_id = call->request.step_id();
     TRACEPRINTF("RunGraph: %lld", step_id);
     GraphMgr::NamedTensors in;
@@ -307,7 +308,14 @@ class GrpcWorkerService : public AsyncServiceInterface {
       call->SendResponse(ToGrpcStatus(s));
       return;
     }
+    const bool do_trace = call->request.exec_opts().record_timeline();
     StepStatsCollector* collector = nullptr;
+    if (do_trace) {
+      VLOG(0) << "Creating StepStatsCollector";
+      collector = new StepStatsCollector(call->response.mutable_step_stats());
+      // TODO(pbar) create GPUTracer!
+      VLOG(0) << "Got SSC";
+    }
     // TODO(mrry): Collect results from a profiler if available.
     CancellationManager* cm = new CancellationManager;
     call->SetCancelCallback([this, cm, step_id]() {
@@ -323,7 +331,9 @@ class GrpcWorkerService : public AsyncServiceInterface {
     }
     env_->graph_mgr->ExecuteAsync(
         call->request.graph_handle(), step_id, call->request.exec_opts(),
-        collector, cm, in, out, [this, call, cm, out, token](Status s) {
+        collector, cm, in, out, [this, call, collector, cm, out, token](Status s) {
+          VLOG(0) << "Done ExecuteAsync";
+          VLOG(0) << call->response.step_stats().DebugString();
           call->ClearCancelCallback();
           {
             mutex_lock l(mu_);
@@ -342,6 +352,7 @@ class GrpcWorkerService : public AsyncServiceInterface {
               val.AsProtoField(proto);
             }
           }
+          delete collector;
           delete out;
           call->SendResponse(ToGrpcStatus(s));
         });

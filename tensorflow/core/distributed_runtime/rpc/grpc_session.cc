@@ -161,7 +161,7 @@ Status GrpcSession::Run(const RunOptions& run_options,
   // Convert to proto
   RunStepRequest req;
   RunStepResponse resp;
-
+  VLOG(0) << "GrpcSession::Run " << run_options.DebugString();
   for (const auto& it : inputs) {
     Tensor input_tensor = it.second;
     auto feed = req.add_feed();
@@ -169,6 +169,7 @@ Status GrpcSession::Run(const RunOptions& run_options,
     TensorProto* proto = feed->mutable_tensor();
     input_tensor.AsProtoTensorContent(proto);
   }
+  *req.mutable_options() = run_options;
 
   // Build an index from fetch tensor name to offset.
   std::unordered_map<string, int> output_name_to_offset;
@@ -205,7 +206,10 @@ Status GrpcSession::Run(const RunOptions& run_options,
 
     (*outputs)[fetch_it->second] = output;
   }
-
+  if (run_options.trace_level() > RunOptions::NO_TRACE) {
+    VLOG(0) << "GrpcSession::Run " << resp.metadata().DebugString();
+    *run_metadata = resp.metadata();
+  }
   return Status::OK();
 }
 

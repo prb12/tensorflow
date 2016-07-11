@@ -510,7 +510,7 @@ Status MasterSession::ReffedClientGraph::RunPartitions(
     SimpleGraphExecutionState* execution_state, PerStepState* pss,
     CallOptions* call_opts, const RunStepRequest& req, RunStepResponse* resp,
     CancellationManager* cm) {
-  VLOG(2) << "RunPartitions step_id " << step_id << " execution_count "
+  VLOG(0) << "RunPartitions step_id " << step_id << " execution_count "
           << execution_count;
   // Builds an index for feeds provided by the client.
   std::unordered_map<StringPiece, const TensorProto*, StringPiece::Hasher>
@@ -523,10 +523,16 @@ Status MasterSession::ReffedClientGraph::RunPartitions(
   }
 
   // Prepares a number of calls to workers. One call per partition.
-  ExecutorOpts exec_opts;
   const int num = partitions_.size();
   RunManyGraphs calls(num);
-
+  ExecutorOpts exec_opts;
+  VLOG(0) << req.options().DebugString();
+  const bool do_trace = (req.options().trace_level() > RunOptions::NO_TRACE);
+  if (do_trace) {
+    exec_opts.set_record_timeline(true);
+    pss->step_stats.resize(num);
+  }
+  VLOG(0) << "Exec_opts = " << exec_opts.DebugString();
   for (int i = 0; i < num; ++i) {
     const Part& part = partitions_[i];
     RunManyGraphs::Call* c = calls.get(i);
@@ -579,6 +585,8 @@ Status MasterSession::ReffedClientGraph::RunPartitions(
     return errors::Cancelled("Step was cancelled");
   }
 
+  VLOG(0) << "metadata: " << resp->metadata().DebugString();
+  StepStats* merged_step_stats = resp->mutable_metadata()->mutable_step_stats();
   // Collects fetches.
   Status status = calls.status();
   if (status.ok()) {
@@ -600,10 +608,13 @@ Status MasterSession::ReffedClientGraph::RunPartitions(
         }
       }
       if (calls.get(i)->resp.has_step_stats()) {
-        pss->step_stats[i].Swap(calls.get(i)->resp.mutable_step_stats());
+        VLOG(0) << "Response has_step_stats";
+        // pss->step_stats[i].Swap(calls.get(i)->resp.mutable_step_stats());
+        merged_step_stats->MergeFrom(calls.get(i)->resp.step_stats());
       }
     }
   }
+  VLOG(0) << "merged_step_stats: " << merged_step_stats->DebugString();
   return status;
 }
 
@@ -858,6 +869,7 @@ void MasterSession::ClearRunsTable(std::vector<ReffedClientGraph*>* to_unref,
 
 Status MasterSession::Run(CallOptions* opts, const RunStepRequest* req,
                           RunStepResponse* resp) {
+  VLOG(0) << "MasterSession::Run " << req->DebugString();
   UpdateLastAccessTime();
   {
     mutex_lock l(mu_);
@@ -877,7 +889,7 @@ Status MasterSession::Run(CallOptions* opts, const RunStepRequest* req,
 Status MasterSession::DoRunWithLocalExecution(CallOptions* opts,
                                               const RunStepRequest* req,
                                               RunStepResponse* resp) {
-  VLOG(2) << "DoRunWithLocalExecution "
+  VLOG(0) << "DoRunWithLocalExecution "
           << "req: " << req->DebugString();
   PerStepState pss;
   pss.start_micros = Env::Default()->NowMicros();
