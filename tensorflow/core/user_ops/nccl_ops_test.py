@@ -19,11 +19,12 @@ sess_config = tf.ConfigProto(
 
 
 with tf.Session('', config=sess_config) as sess:
+  unique_id = nccl_ops.nccl_unique_id()
   for i in xrange(NUM):
     with tf.device('/gpu:%d' % 0):  # i
       handle = nccl_ops.nccl_comm_resource_handle_op(shared_name="comm%d" % i)
       print(handle)
-      comm = nccl_ops.nccl_init_comm(handle, rank=i, N=NUM, id=12345)
+      comm = nccl_ops.nccl_init_comm(handle, unique_id, rank=i, N=NUM)
       #print(comm)
       inits.append(comm)
 

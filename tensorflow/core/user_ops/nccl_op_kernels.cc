@@ -15,7 +15,7 @@ namespace {
 
 #if false
 // TODO(pbar) It may be necessary to use ncclCommInitAll to avoid
-// creating all the shared emory segments used by multi-process nccl comm.
+// creating all the shared memory segments used by multi-process nccl comm.
 class NcclCommunicator : public ResourceBase {
  public:
   NcclCommunicator(const std::vector<int>& devices)
@@ -112,7 +112,6 @@ class NcclInitCommOp : public AsyncOpKernel {
     VLOG(1) << "NcclInitCommOp constructor";
     OP_REQUIRES_OK(ctx, ctx->GetAttr("rank", &rank_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("N", &num_devices_));
-    OP_REQUIRES_OK(ctx, ctx->GetAttr("id", &unique_id_));
   }
 
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override {
@@ -178,6 +177,24 @@ class NcclReduceOp : public OpKernel {
   }
 };
 
+class NcclUniqueIdOp : public OpKernel {
+ public:
+  explicit NcclUniqueIdOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
+  }
+
+  void Compute(OpKernelContext* ctx) override {
+    VLOG(1) << "NcclUniqueuId::Compute";
+    Tensor* output = nullptr;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(0, TensorShape({}), &output));
+    string *buffer = &output->scalar<string>()();
+    buffer->resize(NCCL_UNIQUE_ID_BYTES);
+    ncclUniqueId* unique_id = reinterpret_cast<ncclUniqueId*>(&(*buffer)[0]);
+    ncclResult_t ret = ncclGetUniqueId(unique_id);
+    CHECK_EQ(ret, ncclSuccess);
+    VLOG(1) << "Got UniqueId";
+  }
+};
+
 class NcclAllReduceOp : public OpKernel {
  public:
   explicit NcclAllReduceOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
@@ -209,7 +226,7 @@ class NcclAllReduceOp : public OpKernel {
     cudaStream_t stream = ctx->eigen_gpu_device().stream();
     VLOG(1) << "comm->comm(): " << comm->comm();
     VLOG(1) << "stream: " << stream;
-    
+
     // TODO(pbar) For now, I run all of the nccl ops on distinct streams
     // since they need to execute concurrently and I only have one GPU!.
     // This is BUGGY since it doesn't wait for the inputs to be comuted on
@@ -271,9 +288,16 @@ REGISTER_KERNEL_BUILDER(Name("NcclCommResourceHandleOp")
                         .HostMemory("comm"),
                         ResourceHandleOp<NcclCommResource>);
 
+REGISTER_KERNEL_BUILDER(Name("NcclUniqueId")
+                        .Device(DEVICE_CPU), NcclUniqueIdOp);
+REGISTER_KERNEL_BUILDER(Name("NcclUniqueId")
+                        .Device(DEVICE_GPU)
+                        .HostMemory("id"), NcclUniqueIdOp);
+
 REGISTER_KERNEL_BUILDER(Name("NcclInitComm")
                         .Device(DEVICE_GPU)
-                        .HostMemory("comm"), NcclInitCommOp);
+                        .HostMemory("comm")
+                        .HostMemory("id"), NcclInitCommOp);
 REGISTER_KERNEL_BUILDER(Name("NcclInitComm")
                         .Device(DEVICE_CPU), NcclInitCommOp);
 

@@ -4,6 +4,9 @@
 
 //REGISTER_RESOURCE_HANDLE_OP(NcclCommResource);
 
+REGISTER_OP("NcclUniqueId")
+.Output("id : string");
+
 REGISTER_OP("NcclCommResourceHandleOp")
       .Attr("container: string = ''")
       .Attr("shared_name: string = ''")
@@ -13,11 +16,10 @@ REGISTER_OP("NcclCommResourceHandleOp")
       .Doc("Creates a handle to a NcclCommResource.");
 
 REGISTER_OP("NcclInitComm")
-    .Input("comm: resource")
+.Input("comm: resource")
+.Input("id : string")
     .Attr("rank: int")
-    .Attr("N: int")
-    .Attr("id: int");
-//    .SetShapeFn(shape_inference::ScalarShape);
+    .Attr("N: int");
 
 REGISTER_OP("NcclReduce")
     .Input("comm: resource")
