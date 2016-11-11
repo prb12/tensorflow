@@ -42,11 +42,9 @@ class NcclCommunicator : public ResourceBase {
 };
 #endif
 
-static ncclUniqueId global_id;
-
 class NcclCommResource : public ResourceBase {
  public:
-  NcclCommResource(int rank, int num, int id)
+  NcclCommResource(int rank, int num, const ncclUniqueId& id)
       : rank_(rank), num_devices_(num), comm_id_(id), comm_(NULL)
   {
     VLOG(1) << "NcclCommResource create " << rank << "/" << num;
@@ -55,12 +53,8 @@ class NcclCommResource : public ResourceBase {
 
   Status Init() {
     ncclResult_t ret;
-    static bool init_done = init_once();
-    CHECK(init_done);
-    VLOG(1) << "Calling InitRank " << rank_ << " / " << num_devices_;
-    VLOG(1) << "Before comm_ = " << comm_;
-    ret = ncclCommInitRank(&comm_, num_devices_, global_id, rank_);
-    VLOG(1) << "After comm_ = " << comm_;
+    VLOG(1) << "Calling ncclCommInitRank " << rank_ << " / " << num_devices_;
+    ret = ncclCommInitRank(&comm_, num_devices_, comm_id_, rank_);
     CHECK_EQ(ret, ncclSuccess);
     cudaStreamCreate(&stream_);
     cudaEventCreateWithFlags(&event_, cudaEventDisableTiming);
@@ -84,20 +78,9 @@ class NcclCommResource : public ResourceBase {
     VLOG(1) << "NcclCommResource destructor.";
   }
  private:
-  bool init_once() {
-    // TODO(pbar) This is the ID shared by all tasks in a
-    // communicator clique.  Since we can't share resources across TF
-    // devices currently, we are using a single global id.
-    // This means there can only be one clique of fixed size.
-    VLOG(1) << "Init UniqueId";
-    ncclResult_t ret = ncclGetUniqueId(&global_id);
-    CHECK_EQ(ret, ncclSuccess);
-    VLOG(1) << "Got UniqueId";
-    return true;
-  }
   int rank_;
   int num_devices_;
-  int comm_id_;
+  ncclUniqueId comm_id_;
   ncclComm_t comm_;
   cudaStream_t stream_;
   cudaEvent_t event_;
@@ -115,12 +98,16 @@ class NcclInitCommOp : public AsyncOpKernel {
   }
 
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override {
-    VLOG(1) << "NcclInitCommOp::Compute " << rank_ << "/" << num_devices_ <<":" << unique_id_;
+    VLOG(1) << "NcclInitCommOp::Compute " << rank_ << "/" << num_devices_;
     auto handle = HandleFromInput(ctx, 0);
     VLOG(1) << "Got handle";
     VLOG(1) << "Handle: " << handle.DebugString();
 
-    auto* comm = new NcclCommResource(rank_, num_devices_, unique_id_);
+    const Tensor& id_tensor = ctx->input(1);
+    const StringPiece id_string = id_tensor.scalar<string>()();
+    const ncclUniqueId* unique_id = reinterpret_cast<const ncclUniqueId*>(id_string.data());
+
+    auto* comm = new NcclCommResource(rank_, num_devices_, *unique_id);
     OP_REQUIRES_OK(ctx, CreateResource<NcclCommResource>(
         ctx, HandleFromInput(ctx, 0), comm));
     VLOG(1) << "Created resource: comm=" << comm;
@@ -144,7 +131,6 @@ class NcclInitCommOp : public AsyncOpKernel {
   }
   int rank_;
   int num_devices_;
-  int unique_id_;
 };
 
 
