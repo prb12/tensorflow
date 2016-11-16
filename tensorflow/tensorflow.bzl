@@ -649,6 +649,7 @@ def _get_repository_roots(ctx, files):
 def _transitive_hdrs_impl(ctx):
   outputs = set()
   for dep in ctx.attr.deps:
+    if not hasattr(dep, 'cc'): continue
     outputs += dep.cc.transitive_headers
   return struct(files=outputs)
 
