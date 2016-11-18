@@ -53,6 +53,8 @@ const char *getMemcpyKindString(CUpti_ActivityMemcpyKind kind) {
       return "DtoD";
     case CUPTI_ACTIVITY_MEMCPY_KIND_HTOH:
       return "HtoH";
+    case CUPTI_ACTIVITY_MEMCPY_KIND_PTOP:
+      return "PtoP";
     default:
       break;
   }
@@ -432,6 +434,12 @@ Status GPUTracerImpl::Start() {
   CUPTI_CALL(EnableCallback(/*enable=*/1, subscriber_,
                             CUPTI_CB_DOMAIN_DRIVER_API,
                             CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2));
+  CUPTI_CALL(EnableCallback(/*enable=*/1, subscriber_,
+                            CUPTI_CB_DOMAIN_DRIVER_API,
+                            CUPTI_DRIVER_TRACE_CBID_cuMemcpyPeer));
+  CUPTI_CALL(EnableCallback(/*enable=*/1, subscriber_,
+                            CUPTI_CB_DOMAIN_DRIVER_API,
+                            CUPTI_DRIVER_TRACE_CBID_cuMemcpyPeerAsync));
 
   TF_RETURN_IF_ERROR(cupti_manager_->EnableTrace(this));
 
@@ -511,9 +519,11 @@ void GPUTracerImpl::AddCorrelationId(uint32 correlation_id,
              (cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoD_v2 ||
               cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoH_v2 ||
               cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoD_v2 ||
+              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyPeer ||
               cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoDAsync_v2 ||
               cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2 ||
-              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2)) {
+              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2 ||
+              cbid == CUPTI_DRIVER_TRACE_CBID_cuMemcpyPeerAsync)) {
     if (cbInfo->callbackSite == CUPTI_API_EXIT && tls_annotation) {
       const string annotation = tls_annotation;
       tracer->AddCorrelationId(cbInfo->correlationId, annotation);
@@ -527,7 +537,8 @@ void GPUTracerImpl::ActivityCallback(const CUpti_Activity &record) {
   VLOG(2) << "ActivityCallback " << record.kind;
   mutex_lock l(trace_mu_);
   switch (record.kind) {
-    case CUPTI_ACTIVITY_KIND_MEMCPY: {
+    case CUPTI_ACTIVITY_KIND_MEMCPY: 
+    case CUPTI_ACTIVITY_KIND_MEMCPY2: {
       if (memcpy_records_.size() >= kMaxRecords) return;
       auto *memcpy = reinterpret_cast<const CUpti_ActivityMemcpy *>(&record);
       memcpy_records_.push_back(MemcpyRecord{
